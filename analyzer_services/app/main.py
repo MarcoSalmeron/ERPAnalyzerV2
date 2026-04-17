@@ -40,7 +40,24 @@ services = FastAPI(
 )
 
 services.mount("/static/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
-services.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
+
+# CORS: restrict to an explicit allow-list loaded from the environment.
+# Configure CORS_ALLOWED_ORIGINS as a comma-separated list of origins.
+# Defaults to the local Vite dev server. Never use "*" in production.
+_cors_env = os.environ.get(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+_allowed_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
+services.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
+
 # Incluir rutas de la API
 services.include_router(router)
 

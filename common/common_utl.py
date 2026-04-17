@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import random
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -182,7 +183,18 @@ def get_embedding(texto: str, es_busqueda: bool = False):
     return get_embeddings_model().embed_query(f"{prefix}{texto}")
 
 def get_conn():
-    return psycopg2.connect("postgresql://postgres:SalRam021@localhost:5432/vectordb")
+    """Return a new psycopg2 connection built from the DATABASE_URL env var.
+
+    Credentials MUST NOT be hardcoded in source. Configure DATABASE_URL in
+    your environment (see .env.example) before starting the service.
+    """
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        raise RuntimeError(
+            "DATABASE_URL environment variable is not set. "
+            "Configure it (see .env.example) before connecting to the database."
+        )
+    return psycopg2.connect(dsn)
 
 def count_impacts(keywords, impactos_lista):
     return sum(1 for i in impactos_lista if any(k.lower() in i.Action_to_Enable.lower() for k in keywords))
