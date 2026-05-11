@@ -6,6 +6,16 @@ const ChatBox = ({ messages, onStartAnalysis, resumeAnalysis, isAnalyzing, pdfUr
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+ // Agregar ref para el input de archivo
+const fileInputRef = useRef(null);
+const [attachedFile, setAttachedFile] = useState(null);
+
+// Handler para cuando se selecciona un archivo
+const handleFileChange = (e) => {
+  const file = e.target.files[0];
+  if (file) setAttachedFile(file);
+};
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -70,37 +80,68 @@ const handleSubmit = (e) => {
         )}
         <div ref={messagesEndRef} />
       </div>
+        <form onSubmit={handleSubmit} className="p-4 border-t border-oracle-border">
+          {/* Mostrar archivo adjunto si hay uno */}
+          {attachedFile && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-oracle-muted bg-oracle-surface border border-oracle-border rounded px-3 py-1">
+              <svg className="w-4 h-4 text-oracle-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+              <span className="flex-1 truncate">{attachedFile.name}</span>
+              <button type="button" onClick={() => setAttachedFile(null)} className="hover:text-oracle-error">✕</button>
+            </div>
+          )}
 
-      <form onSubmit={handleSubmit} className="p-4 border-t border-oracle-border">
-        <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Describe tu consulta sobre Oracle Cloud..."
-            className="input-field flex-1"
-            disabled={isAnalyzing}
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isAnalyzing}
-            className="btn-primary px-6"
-          >
-            {isAnalyzing ? (
-              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Describe tu consulta sobre Oracle Cloud..."
+              className="input-field flex-1"
+              disabled={isAnalyzing}
+            />
+
+            {/* Botón de attachment */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isAnalyzing}
+              className="btn-secondary px-3"
+              title="Adjuntar archivo"
+            >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
-            )}
-          </button>
-        </div>
-      </form>
+            </button>
+
+            {/* Botón de envío */}
+            <button
+              type="submit"
+              disabled={!input.trim() || isAnalyzing}
+              className="btn-primary px-6"
+            >
+              {isAnalyzing ? (
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </form>
     </div>
   );
 };

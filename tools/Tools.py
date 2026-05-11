@@ -23,6 +23,9 @@ from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER,TA_LEFT
 from langchain_core.runnables import RunnableConfig
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import pdfplumber
+import openpyxl
+import io
 
 
 
@@ -100,26 +103,38 @@ def tool_obtener_config_bot(nombre_bot: str) -> dict:
         raise
 
 @tool
-def tool_pdf_a_base64(thread_id: str) -> dict:
+def tool_pdf_a_excel_base64(thread_id: str) -> dict:
     """
-    Lee el PDF generado para el thread_id y lo retorna en base64.
-    Retorna: {"name": "reporte_xxx.pdf", "content": "base64...", "type": "application/pdf"}
+    Lee el PDF generado para el thread_id, extrae las tablas,
+    las convierte a Excel (.xlsx) y retorna el archivo en base64.
     """
-    filename = f"reporte_{thread_id}.pdf"
-    ruta_pdf = f"./reports/{filename}"
+    ruta_pdf = f"./reports/reporte_{thread_id}.pdf"
 
     if not os.path.exists(ruta_pdf):
         raise FileNotFoundError(f"PDF no encontrado en {ruta_pdf}")
 
-    with open(ruta_pdf, "rb") as f:
-        contenido_b64 = base64.b64encode(f.read()).decode("utf-8")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
 
-    logger.info(f"[PDF] --> PDF {filename} codificado en base64 ({len(contenido_b64)} chars)")
-    return {
-        "name": filename,
-        "content": contenido_b64,
-        "type": "application/pdf"
-    }
+    with pdfplumber.open(ruta_pdf) as pdf:
+        for i, page in enumerate(pdf.pages):
+            tables = page.extract_tables()
+            for j, table in enumerate(tables):
+                ws = wb.create_sheet(title=f"Pag{i + 1}_T{j + 1}")
+                for row in table:
+                    ws.append([cell or "" for cell in row])
+
+    if not wb.sheetnames:
+        ws = wb.create_sheet(title="Reporte")
+        ws.append(["No se encontraron tablas en el PDF"])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    contenido_b64 = base64.b64encode(buffer.read()).decode("utf-8")
+
+    logger.info(f"[Excel] --> Excel generado para {thread_id} ({len(contenido_b64)} chars)")
+    return {"content": contenido_b64, "tipo": "xlsx"}
 
 @tool
 def tool_obtener_bots_disponibles() -> List[str]:
@@ -151,13 +166,26 @@ async def tool_investigar_version(version: str):
     Ejecuta toda la investigación de una versión:
     1. Extrae impactos
     2. Extrae APIs deprecadas
-    3. Guarda resultados en pgvector
+    3. Guarda resultados en pgvector (solo si hay datos)
     """
 
     logger.info(f"Iniciando investigación para versión {version}")
 
     impactos = await tool_descubrir_url_modulo(version)
     apis = await tool_extraer_apis_deprecadas(version)
+
+    # GUARDRAIL: si no hay datos, la versión no existe
+    if (not impactos and not apis) or (not impactos or not apis):
+        logger.warning(f"[Investigador] Versión '{version}' no encontrada en Oracle Cloud Readiness. Eliminando registro PENDING.")
+
+        # Eliminar el registro PENDING para no dejar basura en la DB
+        conn = get_conn()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM oracle_versions WHERE version_id = %s", (version.upper().strip(),))
+            conn.commit()
+        conn.close()
+
+        return f"ERROR_VERSION: La versión '{version}' no fue encontrada en Oracle Cloud Readiness. No existen datos publicados para esta versión."
 
     reporte = ReporteInvestigacion(
         impactos=impactos,
@@ -188,6 +216,7 @@ async def tool_descubrir_url_modulo(version: str):
         
         
         data_results = []
+        data = []
         try:
             
             
@@ -452,30 +481,23 @@ def tool_verificar_y_esperar_version(version: str) -> str:
     cur = conn.cursor()
     logger.info(f"[Analista]---> Verificar y esperar la versión {version_id}")
     try:
-        # 1. Consultar estado actual
+        cur.execute("""  
+            INSERT INTO oracle_versions (version_id, status)  
+            VALUES (%s, 'PENDING')  
+            ON CONFLICT (version_id) DO NOTHING  
+        """, (version_id,))
+        conn.commit()
+
+        # Ahora leer el estado real (sea el que acabamos de insertar o el que ya existía)
         cur.execute("SELECT status FROM oracle_versions WHERE version_id = %s", (version_id,))
         row = cur.fetchone()
-        
-        # CASO 1: No existe en la DB -> Bloqueamos y pedimos investigar
-        if not row:
-            cur.execute(
-                "INSERT INTO oracle_versions (version_id, status) VALUES (%s, 'PENDING')", 
-                (version_id,)
-            )
-            conn.commit()
-            return "SOLICITAR_INVESTIGACION"
-        
-        # CASO 2: Existe. Evaluamos el estado guardado en la primera columna
-        status = row[0] 
-        print(f"ℹ️ Version {version_id} status: {status}")
+        status = row[0]
+
         if status == 'COMPLETED':
             return "DATA_LISTA"
-            
         if status == 'PENDING':
             return "ESPERAR_COLA"
-        
-            
-        # Si está en 'failed' o cualquier otro, permitimos reintentar
+            # fallback: failed u otro estado
         cur.execute("UPDATE oracle_versions SET status = 'PENDING' WHERE version_id = %s", (version_id,))
         conn.commit()
         return "SOLICITAR_INVESTIGACION"

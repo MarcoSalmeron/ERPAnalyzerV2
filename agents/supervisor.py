@@ -93,9 +93,13 @@ Debes interpretar su respuesta de la siguiente forma:
   → La información ya fue guardada en la base de datos.
   → Debes llamar nuevamente al **ANALISTA** para validar que la versión ahora esté disponible.
 
-* **ERROR_VERSION**
-  → Debes informar el error técnico y finalizar el flujo.
-
+* ## **ERROR_VERSION** ##  
+  → La versión solicitada no existe en Oracle Cloud Readiness o no tiene datos publicados.  
+  → Informa al usuario con este mensaje exacto:  
+    "La versión [X] no fue encontrada en Oracle Cloud Readiness.   
+     Por favor verifica que el código de versión sea correcto (ej: 25A, 24D)   
+     o intenta con otra versión."  
+  → Finaliza el flujo.  
 ---
 
 ### 3. REDACTOR — Generación del Reporte

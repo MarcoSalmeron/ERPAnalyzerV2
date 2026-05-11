@@ -78,6 +78,18 @@ async function resumeAnalysis(respuesta) {
       return;
     }
 
+    if (data.type === "error") {
+  setIsAnalyzing(false);
+  setMessages(prev => [...prev, {
+    id: Date.now(),
+    agent: "system",
+    type: "error",          // componente de chat renderizarlo en rojo  
+    content: data.content,
+    timestamp: new Date().toISOString(),
+  }]);
+  return;
+}
+
     // interrupción
 if (data.type === "interrupt") {
   setIsAnalyzing(false);

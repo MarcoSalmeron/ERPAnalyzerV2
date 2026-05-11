@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 const PdfViewer = ({ pdfUrl, onReset }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const MODULOS = [
+    { label: 'Financials', file: 'Financials.pdf' },
+    { label: 'Supply Chain and Manufacturing', file: 'Supply Chain and Manufacturing.pdf' },
+    { label: 'Human Capital Management', file: 'Human Capital Management.pdf' }
+  ];
 
   const fullPdfUrl = pdfUrl ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}${pdfUrl}` : null;
 
@@ -13,6 +21,23 @@ const PdfViewer = ({ pdfUrl, onReset }) => {
   const handleError = () => {
     setIsLoading(false);
     setError('Error al cargar el PDF');
+  };
+
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleDescargar = (file) => {
+    const base = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    window.open(`${base}/static/plantillas/${file}`, '_blank');
+    setDropdownOpen(false);
   };
 
   return (
@@ -28,14 +53,52 @@ const PdfViewer = ({ pdfUrl, onReset }) => {
           <p className="text-xs text-oracle-muted mt-1">
             Documento de análisis generado
           </p>
+
+          {/* ── Botón Descargar Plantillas con dropdown ── */}
+          <div className="relative mt-2" ref={dropdownRef}>
+            <button
+              type="button"
+              onClick={() => setDropdownOpen(prev => !prev)}
+              className="btn-secondary flex items-center gap-2 text-xs px-3 py-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Descargar Plantillas
+              <svg
+                className={`w-3 h-3 transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {dropdownOpen && (
+              <div className="absolute left-0 top-full mt-1 z-50 bg-oracle-surface border border-oracle-border rounded-lg shadow-lg min-w-max">
+                {MODULOS.map((mod) => (
+                  <button
+                    key={mod.label}
+                    type="button"
+                    onClick={() => handleDescargar(mod.file)}
+                    className="w-full text-left px-4 py-2 text-sm text-oracle-text hover:bg-oracle-border transition-colors duration-150 first:rounded-t-lg last:rounded-b-lg flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-oracle-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {mod.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        
+
         {pdfUrl && (
           <a
             href={fullPdfUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary flex items-center gap-2 text-sm"
+            className="btn-secondary flex items-center gap-2 text-sm self-start"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />

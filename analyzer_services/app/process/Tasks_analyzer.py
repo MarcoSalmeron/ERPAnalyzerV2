@@ -2,7 +2,7 @@ from analyzer_services.app.process.ConnectionManager import manager
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.errors import GraphInterrupt
 from analyzer_services.app.state import pending_responses
-from tools.Tools import tool_pdf_a_base64, tool_obtener_config_bot
+from tools.Tools import tool_pdf_a_excel_base64, tool_obtener_config_bot
 from analyzer_services.app.auth.auth_service import auth_service
 import httpx
 from common.common_utl import get_embeddings_model
@@ -48,6 +48,12 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                 async for event in oracle_app.astream(inputs, config=config, stream_mode="values"):
                     if "messages" in event:
                         last_msg = event["messages"][-1]
+                        if hasattr(last_msg, 'content') and "ERROR_VERSION" in str(last_msg.content):
+                            await manager.send_update(thread_id, {
+                                "type": "error",  # error para el frontend
+                                "agent": "investigador",
+                                "content": last_msg.content
+                            })
                         if hasattr(last_msg, 'name') and last_msg.name:
                             agent_name = last_msg.name.lower()
                             logger.info(f"Detección de agente: {agent_name}")
@@ -60,6 +66,20 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                                 "status": "active",
                                 "content": last_msg.content,
                                 "log": f"Ejecutando tareas de {agent_name}..."
+                            })
+
+                            if agent_name == "transfer_to_investigador":
+                                await manager.send_update(thread_id, {
+                                    "type": "info",
+                                    "agent": "investigador",
+                                    "content": "Esta versión no se encuentra en la base de datos. El Investigador está obteniendo la información desde Oracle Cloud Readiness. Este proceso puede tardar varios minutos..."
+                                })
+
+                        if hasattr(last_msg, 'content') and "ESPERAR_COLA" in str(last_msg.content):
+                            await manager.send_update(thread_id, {
+                                "type": "info",
+                                "agent": "analista",
+                                "content": "Esta versión ya está siendo investigada en este momento. Por favor espera mientras se obtiene la información..."
                             })
 
                 state = await oracle_app.aget_state(config)
@@ -122,12 +142,12 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                     if respuesta_regresion.strip().lower() in ("sí", "si", "s", "yes", "y"):
 
                         try:
-                            # 1. PDF en base64
-                            pdf_data = tool_pdf_a_base64.invoke({"thread_id": thread_id})
+                            # 1. Convertir PDF a Excel en base64
+                            excel_data = tool_pdf_a_excel_base64.invoke({"thread_id": thread_id})
 
                             # 2. Obtener config del bot
                             nombre_bot = pending_responses.get(f"{thread_id}_bot", "Envio de correo Marco")
-                            config_bot = tool_obtener_config_bot.invoke({"nombre_bot" : nombre_bot})
+                            config_bot = tool_obtener_config_bot.invoke({"nombre_bot": nombre_bot})
 
                             # 3. body
                             body = {
@@ -135,7 +155,8 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                                 "execute_bot": config_bot["execute_bot"],
                                 "agent_name": config_bot["nombre_agente"],
                                 "execution_variables": {
-                                    "vPdfBase64": pdf_data
+                                    "vArchivoBase64": excel_data["content"],
+                                    "vTipoArchivo": excel_data["tipo"]
                                 }
                             }
 
