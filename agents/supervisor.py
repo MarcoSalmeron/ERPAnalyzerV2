@@ -15,30 +15,6 @@ load_dotenv(override=True)
 model = ChatOpenAI(model="gpt-4o", temperature=0)
 
 
-def security_pre_model_hook(state: dict):
-
-    messages = state.get("messages", [])
-    ultimo_human = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
-
-    if ultimo_human:
-        es_ataque, motivo = detectar_ataque(ultimo_human.content)
-        if es_ataque:
-            return Command(
-                update={
-                    "messages": [
-                        AIMessage(content=(
-                            f"No puedo procesar esa solicitud. Motivo: {motivo}"
-                            "Este sistema está diseñado exclusivamente para analizar "
-                            "Oracle Cloud Readiness. Por favor, ingresa una versión y un módulo válido "
-                            "ej. 25A, 24D para continuar."
-                        ))
-                    ]
-                },
-                goto=END
-            )
-
-    return state
-
 prompt_supervisor = """
 Eres el **Director de Consultoría de Oracle Cloud**. Tu misión es coordinar el flujo de agentes para analizar Oracle Cloud Readiness, persistir los impactos en pgvector y generar un reporte ejecutivo en PDF.
 
@@ -168,5 +144,4 @@ team = create_supervisor(
     prompt=prompt_supervisor,
     tools=[tool_obtener_modulos_disponibles, tool_obtener_bots_disponibles],
     output_mode="last_message",
-    pre_model_hook=security_pre_model_hook,
 )

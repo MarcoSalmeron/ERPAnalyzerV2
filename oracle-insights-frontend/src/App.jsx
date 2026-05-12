@@ -4,8 +4,14 @@ import ChatBox from './components/Chat/ChatBox';
 import PdfViewer from './components/Viewer/PdfViewer';
 import { useOracleWorkflow } from './hooks/useOracleWorkflow';
 import logoCondor from './images/logo_condor.png';
+import Login from './components/Auth/Login';
 
 function App() {
+    const [isAuthenticated, setIsAuthenticated] = React.useState(false);
+
+     if (!isAuthenticated) {
+    return <Login onLogin={() => setIsAuthenticated(true)} />;
+  }
   const {
     isAnalyzing,
     currentStep,
