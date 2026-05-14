@@ -8,6 +8,9 @@ import httpx
 from common.common_utl import get_embeddings_model
 import asyncio
 import logging
+import os
+
+active_threads: set = set()
 
 # ===============================
 # LOGGING
@@ -26,6 +29,8 @@ get_embeddings_model()
 
 # --- Función de Ejecución del Grafo (Lógica Pesada) ---
 async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
+    active_threads.add(thread_id)
+
     await asyncio.sleep(2)
     config = {"configurable": {"thread_id": thread_id}}
     inputs = {"messages": [HumanMessage(content=query)]}
@@ -105,96 +110,120 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
 
                     # ── Verificar si terminó ─────
                 if not state.next:
-                    # ── 1. Enviar el PDF al frontend ──────────────────────────
+
                     filename = f"reporte_{thread_id}.pdf"
-                    await manager.send_update(thread_id, {
-                        "step": 4,
-                        "agent": "redactor",
-                        "status": "completed",
-                        "pdf_ready": True,
-                        "pdf_url": f"/static/reports/{filename}"
-                    })
+                    pdf_path = f"./reports/{filename}"
 
-                    # ── 2. Interrupt: preguntar sobre pruebas de regresión ────
-                    await manager.send_update(thread_id, {
-                        "type": "interrupt",
-                        "agent": "system",
-                        "content": "¿Deseas generar un plan de pruebas de regresión para los impactos detectados? (Sí / No)"
-                    })
+                    if os.path.exists(pdf_path):
+                        # ── 1. Enviar el PDF al frontend ──────────────────────────
+                        await manager.send_update(thread_id, {
+                            "step": 4,
+                            "agent": "redactor",
+                            "status": "completed",
+                            "pdf_ready": True,
+                            "pdf_url": f"/static/reports/{filename}"
+                        })
 
-                    # ── 3. Esperar respuesta del usuario ──────────────────────
-                    while thread_id not in pending_responses:
-                        await asyncio.sleep(0.5)
-                    respuesta_regresion = pending_responses.pop(thread_id)
-                    logger.info(f"📋 Respuesta pruebas de regresión: {respuesta_regresion}")
+                        # ── 2. Interrupt: preguntar sobre pruebas de regresión ────
+                        await manager.send_update(thread_id, {
+                            "type": "interrupt",
+                            "agent": "system",
+                            "content": "¿Deseas generar un plan de pruebas de regresión para los impactos detectados? (Sí / No)"
+                        })
 
-                    # ── 4. Procesar respuesta y notificar al frontend ─────────
-                    if respuesta_regresion.strip().lower() in ("sí", "si", "s", "yes", "y"):
+                        # ── 3. Esperar respuesta del usuario ──────────────────────
+                        while thread_id not in pending_responses:
+                            await asyncio.sleep(0.5)
+                        respuesta_regresion = pending_responses.pop(thread_id)
+                        logger.info(f"📋 Respuesta pruebas de regresión: {respuesta_regresion}")
 
-                        try:
-                            # 1. Convertir PDF a Excel en base64
-                            excel_data = tool_pdf_a_excel_base64.invoke({"thread_id": thread_id})
+                        # ── 4. Procesar respuesta y notificar al frontend ─────────
+                        if respuesta_regresion.strip().lower() in ("sí", "si", "s", "yes", "y"):
 
-                            # 2. Obtener config del bot
-                            nombre_bot = pending_responses.get(f"{thread_id}_bot", "Envio de correo Marco")
-                            config_bot = tool_obtener_config_bot.invoke({"nombre_bot": nombre_bot})
+                            try:
+                                # 1. Convertir PDF a Excel en base64
+                                excel_data = tool_pdf_a_excel_base64.invoke({"thread_id": thread_id})
 
-                            # 3. body
-                            body = {
-                                "bot_name": config_bot["nombre_bot"],
-                                "execute_bot": config_bot["execute_bot"],
-                                "agent_name": config_bot["nombre_agente"],
-                                "execution_variables": {
-                                    "vArchivoBase64": excel_data["content"],
-                                    "vTipoArchivo": excel_data["tipo"]
-                                }
-                            }
+                                # 2. Obtener config del bot
+                                nombre_bot = pending_responses.get(f"{thread_id}_bot", "Envio de correo Marco")
+                                config_bot = tool_obtener_config_bot.invoke({"nombre_bot": nombre_bot})
 
-                            # 4. Obtener token JWT y hacer POST
-                            token = await auth_service.get_token()
-                            endpoint = config_bot["endpoint"]
-
-                            async with httpx.AsyncClient() as client:
-                                resp = await client.post(
-                                    endpoint,
-                                    json=body,
-                                    headers={
-                                        "Content-Type": "application/json",
-                                        "Authorization": f"Bearer {token}"
+                                # 3. body
+                                body = {
+                                    "bot_name": config_bot["nombre_bot"],
+                                    "execute_bot": config_bot["execute_bot"],
+                                    "agent_name": config_bot["nombre_agente"],
+                                    "execution_variables": {
+                                        "vArchivoBase64": excel_data["content"],
+                                        "vTipoArchivo": excel_data["tipo"]
                                     }
-                                )
+                                }
 
-                            if resp.status_code == 200:
+                                # 4. Obtener token JWT y hacer POST
+                                token = await auth_service.get_token()
+                                endpoint = config_bot["endpoint"]
+
+                                async with httpx.AsyncClient() as client:
+                                    resp = await client.post(
+                                        endpoint,
+                                        json=body,
+                                        headers={
+                                            "Content-Type": "application/json",
+                                            "Authorization": f"Bearer {token}"
+                                        }
+                                    )
+
+                                if resp.status_code == 200:
+                                    await manager.send_update(thread_id, {
+                                        "type": "info",
+                                        "agent": "system",
+                                        "content": f"Pruebas de regresión iniciadas correctamente en {config_bot['nombre_bot']}."
+                                    })
+                                else:
+                                    await manager.send_update(thread_id, {
+                                        "type": "info",
+                                        "agent": "system",
+                                        "content": f"Error al iniciar pruebas: {resp.status_code} - {resp.text}"
+                                    })
+                            except Exception as e:
+                                logger.error(f"Error ejecutando pruebas de regresión: {e}")
                                 await manager.send_update(thread_id, {
                                     "type": "info",
                                     "agent": "system",
-                                    "content": f"Pruebas de regresión iniciadas correctamente en {config_bot['nombre_bot']}."
+                                    "content": f"Error técnico al ejecutar pruebas: {str(e)}"
                                 })
-                            else:
-                                await manager.send_update(thread_id, {
-                                    "type": "info",
-                                    "agent": "system",
-                                    "content": f"Error al iniciar pruebas: {resp.status_code} - {resp.text}"
-                                })
-                        except Exception as e:
-                            logger.error(f"Error ejecutando pruebas de regresión: {e}")
+                        else:
                             await manager.send_update(thread_id, {
                                 "type": "info",
                                 "agent": "system",
-                                "content": f"Error técnico al ejecutar pruebas: {str(e)}"
+                                "content": "De acuerdo. El reporte está listo para su revisión."
                             })
-                    else:
+
+                else:
+                    # ── Respuesta conversacional → NO cerrar, esperar siguiente mensaje ──
+                    mensajes = state.values.get("messages", [])
+                    ultimo_msg = next((msg.content for msg in reversed(mensajes) if isinstance(msg, AIMessage)), None)
+
+                    if ultimo_msg:
                         await manager.send_update(thread_id, {
-                            "type": "info",
-                            "agent": "system",
-                            "content": "De acuerdo. El reporte está listo para su revisión."
+
+                            "type": "chat",
+
+                            "agent": "supervisor",
+
+                            "content": ultimo_msg
+
                         })
 
-                        # ── 5. Cerrar conexión ────────────────────────────────────
-                    await manager.close_connection(thread_id)
-                    break
+                    # Esperar el siguiente mensaje del usuario
+                    while thread_id not in pending_responses:
+                        await asyncio.sleep(0.5)
 
-                continue
+                    respuesta = pending_responses.pop(thread_id)
+
+                    inputs = {"messages": [HumanMessage(content=respuesta)]}
+
+                    continue
 
             except GraphInterrupt as gi:
 
@@ -206,15 +235,15 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
 
                     pregunta = str(gi)
 
-            await manager.send_update(thread_id, {
+                await manager.send_update(thread_id, {
 
-                "type": "interrupt",
+                    "type": "interrupt",
 
-                "agent": "system",
+                    "agent": "system",
 
-                "content": pregunta
+                    "content": pregunta
 
-            })
+                })
 
             while thread_id not in pending_responses:
                 await asyncio.sleep(0.5)
@@ -228,3 +257,6 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
     except Exception as e:
         logger.error(f"Error en el flujo de trabajo: {str(e)}")
         await manager.send_update(thread_id, {"error": str(e)})
+
+    finally:
+        active_threads.discard(thread_id)
