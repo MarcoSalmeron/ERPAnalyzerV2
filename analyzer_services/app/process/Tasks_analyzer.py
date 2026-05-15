@@ -2,7 +2,7 @@ from analyzer_services.app.process.ConnectionManager import manager
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.errors import GraphInterrupt
 from analyzer_services.app.state import pending_responses
-from tools.Tools import tool_pdf_a_excel_base64, tool_obtener_config_bot
+from tools.Tools import tool_xlsx_a_base64, tool_obtener_config_bot
 from analyzer_services.app.auth.auth_service import auth_service
 import httpx
 from common.common_utl import get_embeddings_model
@@ -64,8 +64,79 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                             "agent": "supervisor",
                             "content": "Para ejecutar pruebas de regresión, descarga las plantillas (en el panel derecho) y adjúntalas usando el botón 📎 al lado del input del chat."
                         })
-                        await manager.close_connection(thread_id)
-                        break
+                        await manager.send_update(thread_id, {
+                            "type": "interrupt",
+                            "agent": "supervisor",
+                            "content": "Cuando tengas el archivo listo, adjúntalo y presiona enviar."
+                        })
+                        # Esperar el archivo del usuario (mismo thread_id)
+                        while thread_id not in pending_responses:
+                            await asyncio.sleep(0.5)
+
+                        # Procesar archivo
+                        try:
+                            # 1. Convertir Xlsx en base64
+                            file_path = pending_responses.pop(f"{thread_id}_file_path", None)
+                            if not file_path:
+                                await manager.send_update(thread_id, {
+                                    "type": "info", "agent": "system",
+                                    "content": "No se recibió ningún archivo adjunto. Por favor adjunta el archivo xlsx."
+                                })
+                                break
+
+                            excel_data = tool_xlsx_a_base64.invoke({"file_path": file_path})
+
+                            # 2. Obtener config del bot
+                            nombre_bot = pending_responses.get(f"{thread_id}_bot", "Bot Facturas")
+                            config_bot = tool_obtener_config_bot.invoke({"nombre_bot": nombre_bot})
+
+                            # 3. Body con nuevo formato
+                            body = {
+                                "bot_name": config_bot["nombre_bot"],
+                                "execute_bot": config_bot["execute_bot"],
+                                "agent_name": config_bot["nombre_agente"],
+                                "execution_variables": {
+                                    "vExcelBase64": excel_data["content"],  # ← clave nueva
+                                    "vTipoArchivo": "xlsx"  # ← siempre xlsx
+                                }
+                            }
+
+                            # 4. Obtener token JWT y hacer POST
+                            token = await auth_service.get_token()
+                            endpoint = config_bot["endpoint"]
+
+                            async with httpx.AsyncClient() as client:
+                                resp = await client.post(
+                                    endpoint,
+                                    json=body,
+                                    headers={
+                                        "Content-Type": "application/json",
+                                        "Authorization": f"Bearer {token}"
+                                    }
+                                )
+
+                            if resp.status_code == 200:
+                                await manager.send_update(thread_id, {
+                                    "type": "info",
+                                    "agent": "system",
+                                    "content": f"Pruebas de regresión iniciadas correctamente en {config_bot['nombre_bot']}."
+                                })
+                            else:
+                                await manager.send_update(thread_id, {
+                                    "type": "info",
+                                    "agent": "system",
+                                    "content": f"Error al iniciar pruebas: {resp.status_code} - {resp.text}"
+                                })
+                        except Exception as e:
+                            logger.error(f"Error ejecutando pruebas de regresión: {e}")
+                            await manager.send_update(thread_id, {
+                                "type": "info",
+                                "agent": "system",
+                                "content": f"Error técnico al ejecutar pruebas: {str(e)}"
+                            })
+                        finally:
+                            await manager.close_connection(thread_id)
+                            break
 
                     welcome_done = True
                     continue  # vuelve al inicio del while → ahora entra al astream
@@ -150,7 +221,7 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                         "pdf_url": f"/static/reports/{filename}"
                     })
 
-                    # ── 2. Interrupt: preguntar sobre pruebas de regresión ────
+                    # ── 2. Interrupt: preguntar sobre pruebas de regresión (HITL #3)────
                     await manager.send_update(thread_id, {
                         "type": "interrupt",
                         "agent": "system",
@@ -167,21 +238,29 @@ async def run_oracle_analysis(thread_id: str, query: str, oracle_app):
                     if respuesta_regresion.strip().lower() in ("sí", "si", "s", "yes", "y"):
 
                         try:
-                            # 1. Convertir PDF a Excel en base64
-                            excel_data = tool_pdf_a_excel_base64.invoke({"thread_id": thread_id})
+                            # 1. Convertir Xlsx en base64
+                            file_path = pending_responses.pop(f"{thread_id}_file_path", None)
+                            if not file_path:
+                                await manager.send_update(thread_id, {
+                                    "type": "info", "agent": "system",
+                                    "content": "No se recibió ningún archivo adjunto. Por favor adjunta el archivo xlsx."
+                                })
+                                break
+
+                            excel_data = tool_xlsx_a_base64.invoke({"file_path": file_path})
 
                             # 2. Obtener config del bot
-                            nombre_bot = pending_responses.get(f"{thread_id}_bot", "Envio de correo Marco")
+                            nombre_bot = pending_responses.get(f"{thread_id}_bot", "Bot Facturas")
                             config_bot = tool_obtener_config_bot.invoke({"nombre_bot": nombre_bot})
 
-                            # 3. body
+                            # 3. Body con nuevo formato
                             body = {
                                 "bot_name": config_bot["nombre_bot"],
                                 "execute_bot": config_bot["execute_bot"],
                                 "agent_name": config_bot["nombre_agente"],
                                 "execution_variables": {
-                                    "vArchivoBase64": excel_data["content"],
-                                    "vTipoArchivo": excel_data["tipo"]
+                                    "vExcelBase64": excel_data["content"],  # ← clave nueva
+                                    "vTipoArchivo": "xlsx"  # ← siempre xlsx
                                 }
                             }
 

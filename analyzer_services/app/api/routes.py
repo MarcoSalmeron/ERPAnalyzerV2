@@ -1,15 +1,28 @@
 # routes.py
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, UploadFile, File
 from analyzer_services.app.models.schemas import AnalysisRequest
 from analyzer_services.app.process.Tasks_analyzer import run_oracle_analysis
 from analyzer_services.app.process.ConnectionManager import manager
 import uuid
 import asyncio
-
+import tempfile, os
 from schemas.schemas import ERPState
 from analyzer_services.app.state import pending_responses
 
 router = APIRouter(prefix="/impact", tags=["Impact"])
+
+@router.post("/upload-file/{thread_id}")
+async def upload_file(thread_id: str, file: UploadFile = File(...)):
+    # Guardar el archivo en un directorio temporal
+    suffix = os.path.splitext(file.filename)[1]  # ".xlsx"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir="./uploads")
+    content = await file.read()
+    tmp.write(content)
+    tmp.close()
+
+    pending_responses[f"{thread_id}_file_path"] = tmp.name
+    print(f"📎 Archivo guardado en {tmp.name} para thread {thread_id}")
+    return {"status": "ok", "file_path": tmp.name}
 
 @router.post("/resume/{thread_id}")
 async def resume_flow(thread_id: str, data: ERPState):

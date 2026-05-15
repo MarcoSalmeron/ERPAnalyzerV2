@@ -24,12 +24,21 @@ const handleFileChange = (e) => {
     scrollToBottom();
   }, [messages]);
 
-const handleSubmit = (e) => {
+const handleSubmit = async (e) => {
   e.preventDefault();
   if (!input.trim() || isAnalyzing) return;
 
   const query = input.trim();
   setInput('');
+
+    if (attachedFile) {
+    const formData = new FormData();
+    formData.append('file', attachedFile);
+    await api.post(`/impact/upload-file/${threadId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    setAttachedFile(null);
+  }
 
   const lastMsg = messages[messages.length - 1];
   // Interrupciones

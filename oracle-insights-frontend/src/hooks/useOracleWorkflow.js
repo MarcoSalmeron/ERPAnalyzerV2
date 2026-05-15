@@ -209,6 +209,7 @@ if (data.type === "info") {
 
   return {
     isAnalyzing,
+    threadId: threadIdRef.current,
     currentStep,
     agentStatuses,
     messages,
